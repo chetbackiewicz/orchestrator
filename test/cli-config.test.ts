@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dashboardConfig,
   parseArgs,
   publishingConfig,
 } from "../src/config/cli-config.js";
@@ -31,6 +32,36 @@ describe("publishing CLI configuration", () => {
       baseBranch: "release",
       repository: "octo/service",
       remote: "upstream",
+    });
+  });
+
+  describe("dashboard CLI configuration", () => {
+    it("is disabled by default and uses the default port", () => {
+      expect(dashboardConfig(parseArgs([]), {})).toEqual({
+        enabled: false,
+        port: 4317,
+      });
+    });
+
+    it("supports CLI and environment configuration", () => {
+      expect(
+        dashboardConfig(
+          parseArgs(["--dashboard", "--dashboard-port", "4400"]),
+          {},
+        ),
+      ).toEqual({ enabled: true, port: 4400 });
+      expect(
+        dashboardConfig(parseArgs([]), {
+          INCIDENT_DASHBOARD: "true",
+          INCIDENT_DASHBOARD_PORT: "4500",
+        }),
+      ).toEqual({ enabled: true, port: 4500 });
+    });
+
+    it("rejects invalid ports", () => {
+      expect(() =>
+        dashboardConfig(parseArgs(["--dashboard-port", "65536"]), {}),
+      ).toThrow("integer from 0 to 65535");
     });
   });
 

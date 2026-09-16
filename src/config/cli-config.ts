@@ -7,6 +7,11 @@ export interface PublishingCliConfig {
   remote: string;
 }
 
+export interface DashboardCliConfig {
+  enabled: boolean;
+  port: number;
+}
+
 export function parseArgs(values: string[]): CliArgs {
   const args: CliArgs = new Map();
   for (let index = 0; index < values.length; index += 1) {
@@ -49,6 +54,24 @@ export function publishingConfig(
       "origin",
     ...(configuredRepository ? { repository: configuredRepository } : {}),
   };
+}
+
+export function dashboardConfig(
+  args: CliArgs,
+  env: NodeJS.ProcessEnv,
+): DashboardCliConfig {
+  const enabled =
+    optionalBoolean(args, "dashboard") ??
+    optionalEnvironmentBoolean(env.INCIDENT_DASHBOARD, "INCIDENT_DASHBOARD") ??
+    false;
+  const port =
+    optionalNumber(args, "dashboard-port") ??
+    optionalEnvironmentPort(env.INCIDENT_DASHBOARD_PORT) ??
+    4317;
+  if (!Number.isInteger(port) || port > 65_535) {
+    throw new Error("--dashboard-port must be an integer from 0 to 65535");
+  }
+  return { enabled, port };
 }
 
 export function required(args: CliArgs, key: string): string {
@@ -94,6 +117,17 @@ function optionalEnvironmentBoolean(
   name: string,
 ): boolean | undefined {
   return value === undefined ? undefined : parseBoolean(value, name);
+}
+
+function optionalEnvironmentPort(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65_535) {
+    throw new Error(
+      "INCIDENT_DASHBOARD_PORT must be an integer from 0 to 65535",
+    );
+  }
+  return parsed;
 }
 
 function parseBoolean(value: string, name: string): boolean {

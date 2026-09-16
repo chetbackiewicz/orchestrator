@@ -9,17 +9,20 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
+import { validatePublishablePaths } from "./change-policy.js";
 import { FixClaim, VerificationResult } from "./types.js";
 
 export interface TestRunResult {
   passed: boolean;
   detail: string;
+  changedFiles?: string[];
 }
 
 export interface VerifyDeps {
   runTestsAtRef(
     ref: string,
     testPath?: string,
+    options?: { includeWorkingTree?: boolean },
   ): Promise<TestRunResult>;
   validateChangedFiles?(
     preFixRef: string,
@@ -47,8 +50,12 @@ export async function verifyFix(
   if (!guard.passed) return rejected(guard.detail);
 
   const before = await deps.runTestsAtRef(preFixRef, claim.testPath);
-  const after = await deps.runTestsAtRef(fixRef, claim.testPath);
-  const suite = await deps.runTestsAtRef(fixRef);
+  const after = await deps.runTestsAtRef(fixRef, claim.testPath, {
+    includeWorkingTree: true,
+  });
+  const suite = await deps.runTestsAtRef(fixRef, undefined, {
+    includeWorkingTree: true,
+  });
   const reproFailedBeforeFix = !before.passed;
   const reproPassedAfterFix = after.passed;
   const fullSuitePassed = suite.passed;
@@ -68,6 +75,7 @@ export async function verifyFix(
       `post-fix reproduction: ${after.detail}`,
       `post-fix full suite: ${suite.detail}`,
     ].join("\n"),
+    ...(guard.changedFiles ? { verifiedPaths: guard.changedFiles } : {}),
   };
 }
 
@@ -77,8 +85,14 @@ export function defaultVerifyDeps(
 ): VerifyDeps {
   const root = resolve(cwd);
   return {
-    runTestsAtRef: (ref, testPath) =>
-      runTestsInWorktree(root, ref, testPath, timeoutMs),
+    runTestsAtRef: (ref, testPath, options) =>
+      runTestsInWorktree(
+        root,
+        ref,
+        testPath,
+        options?.includeWorkingTree ?? false,
+        timeoutMs,
+      ),
     validateChangedFiles: (preFixRef, fixRef, testPath) =>
       validateChangedFiles(root, preFixRef, fixRef, testPath),
   };
@@ -88,6 +102,7 @@ async function runTestsInWorktree(
   root: string,
   ref: string,
   testPath: string | undefined,
+  includeWorkingTree: boolean,
   timeoutMs: number,
 ): Promise<TestRunResult> {
   validateGitRef(ref);
@@ -121,6 +136,11 @@ async function runTestsInWorktree(
           detail: `Unable to stage reproduction test ${testPath}: ${formatError(error)}`,
         };
       }
+    }
+
+    if (includeWorkingTree) {
+      const overlay = await overlayWorkingTree(root, worktree);
+      if (!overlay.passed) return overlay;
     }
 
     await linkNodeModules(root, worktree);
@@ -161,24 +181,16 @@ async function validateChangedFiles(
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  const normalizedTestPath = testPath?.replaceAll("\\", "/");
-  const violations: string[] = [];
+  const working = await listWorkingTreeChanges(root);
+  if (!working.passed) return working;
+  const workingPaths = working.changedFiles ?? [];
+  const allChanged = [...new Set([...changed, ...workingPaths])];
+  const violations = testPath
+    ? validatePublishablePaths(allChanged, testPath)
+    : ["Agent did not provide a reproduction test path."];
 
-  for (const path of changed) {
-    const normalized = path.replaceAll("\\", "/");
-    if (
-      normalized.startsWith(".github/") ||
-      /(^|\/)vitest\.config\.[^/]+$/.test(normalized)
-    ) {
-      violations.push(path);
-      continue;
-    }
-    if (isTestPath(normalized) && normalized !== normalizedTestPath) {
-      violations.push(path);
-    }
-  }
-
-  if (normalizedTestPath) {
+  if (testPath) {
+    const normalizedTestPath = testPath.replaceAll("\\", "/");
     const existed = await runCommand(
       "git",
       ["cat-file", "-e", `${preFixRef}:${normalizedTestPath}`],
@@ -189,10 +201,14 @@ async function validateChangedFiles(
   }
 
   return violations.length === 0
-    ? { passed: true, detail: "protected files unchanged" }
+    ? {
+        passed: true,
+        detail: "only verified source changes and one new reproduction test changed",
+        changedFiles: allChanged,
+      }
     : {
         passed: false,
-        detail: `Protected verification files changed: ${[...new Set(violations)].join(", ")}`,
+        detail: `Unpublishable or protected files changed: ${[...new Set(violations)].join(", ")}`,
       };
 }
 
@@ -206,15 +222,6 @@ function rejected(detail: string): VerificationResult {
   };
 }
 
-function isTestPath(path: string): boolean {
-  return (
-    path.startsWith("test/") ||
-    path.startsWith("tests/") ||
-    path.includes("/__tests__/") ||
-    /\.(test|spec)\.[cm]?[jt]sx?$/.test(path)
-  );
-}
-
 async function linkNodeModules(root: string, worktree: string): Promise<void> {
   const source = resolve(root, "node_modules");
   const destination = resolve(worktree, "node_modules");
@@ -226,6 +233,99 @@ async function linkNodeModules(root: string, worktree: string): Promise<void> {
   } catch {
     // The command result will clearly report a missing local Vitest install.
   }
+}
+
+interface WorkingTreeEntry {
+  status: string;
+  path: string;
+}
+
+async function listWorkingTreeChanges(
+  root: string,
+): Promise<TestRunResult> {
+  const status = await runCommand(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    root,
+    10_000,
+    false,
+  );
+  if (!status.passed) return status;
+
+  try {
+    const entries = parseWorkingTreeStatus(status.detail);
+    const unsupported = entries.filter(({ status }) => /[RC]/.test(status));
+    if (unsupported.length > 0) {
+      return {
+        passed: false,
+        detail: `Renamed or copied working-tree paths are not publishable: ${unsupported.map(({ path }) => path).join(", ")}`,
+      };
+    }
+    return {
+      passed: true,
+      detail: "working-tree changes enumerated",
+      changedFiles: entries.map(({ path }) => path),
+    };
+  } catch (error) {
+    return { passed: false, detail: formatError(error) };
+  }
+}
+
+async function overlayWorkingTree(
+  root: string,
+  worktree: string,
+): Promise<TestRunResult> {
+  const status = await runCommand(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    root,
+    10_000,
+    false,
+  );
+  if (!status.passed) return status;
+
+  try {
+    const entries = parseWorkingTreeStatus(status.detail);
+    for (const entry of entries) {
+      if (/[RC]/.test(entry.status)) {
+        return {
+          passed: false,
+          detail: `Cannot verify renamed or copied working-tree path: ${entry.path}`,
+        };
+      }
+      const destination = safePath(worktree, entry.path);
+      if (entry.status.includes("D")) {
+        await rm(destination, { force: true });
+        continue;
+      }
+      const source = safePath(root, entry.path);
+      await mkdir(dirname(destination), { recursive: true });
+      await copyFile(source, destination);
+    }
+    return { passed: true, detail: "working-tree changes overlaid" };
+  } catch (error) {
+    return {
+      passed: false,
+      detail: `Unable to overlay working-tree changes: ${formatError(error)}`,
+    };
+  }
+}
+
+function parseWorkingTreeStatus(output: string): WorkingTreeEntry[] {
+  const parts = output.split("\0");
+  const entries: WorkingTreeEntry[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (!part) continue;
+    if (part.length < 4 || part[2] !== " ") {
+      throw new Error(`Unexpected git status entry: ${JSON.stringify(part)}`);
+    }
+    const status = part.slice(0, 2);
+    const path = part.slice(3);
+    entries.push({ status, path });
+    if (/[RC]/.test(status)) index += 1;
+  }
+  return entries;
 }
 
 async function makeTempDirectory(prefix: string): Promise<string> {
@@ -258,6 +358,7 @@ function runCommand(
   args: string[],
   cwd: string,
   timeoutMs: number,
+  trimOutput = true,
 ): Promise<TestRunResult> {
   return new Promise((resolveResult) => {
     const child = spawn(command, args, {
@@ -294,7 +395,8 @@ function runCommand(
         passed: !timedOut && code === 0,
         detail: timedOut
           ? `Timed out after ${timeoutMs}ms`
-          : output.trim() || `Exited with code ${code ?? "unknown"}`,
+          : (trimOutput ? output.trim() : output) ||
+            `Exited with code ${code ?? "unknown"}`,
       });
     });
   });

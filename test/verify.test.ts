@@ -17,14 +17,35 @@ describe("verifyFix", () => {
         summary: "fixed",
       },
       "before",
-      { runTestsAtRef },
+      {
+        runTestsAtRef,
+        async validateChangedFiles() {
+          return {
+            passed: true,
+            detail: "controlled",
+            changedFiles: ["src/incident.ts", "test/incident.test.ts"],
+          };
+        },
+      },
     );
 
     expect(result.outcome).toBe("verified");
+    expect(result.verifiedPaths).toEqual([
+      "src/incident.ts",
+      "test/incident.test.ts",
+    ]);
     expect(runTestsAtRef.mock.calls).toEqual([
       ["before", "test/incident.test.ts"],
-      ["fix/incident", "test/incident.test.ts"],
-      ["fix/incident"],
+      [
+        "fix/incident",
+        "test/incident.test.ts",
+        { includeWorkingTree: true },
+      ],
+      [
+        "fix/incident",
+        undefined,
+        { includeWorkingTree: true },
+      ],
     ]);
   });
 

@@ -319,6 +319,20 @@ export const dashboardHtml = String.raw`<!doctype html>
       color: white;
     }
 
+    .step.failed {
+      color: var(--red);
+    }
+
+    .step.failed:not(:last-child)::after {
+      background: var(--red);
+    }
+
+    .step.failed .step-dot {
+      border-color: var(--red);
+      background: var(--red);
+      color: white;
+    }
+
     .step-label {
       overflow: hidden;
       font-size: 12px;
@@ -582,19 +596,26 @@ export const dashboardHtml = String.raw`<!doctype html>
       elements["connection-label"].textContent = label;
     }
 
-    function renderSteps(state) {
+    function renderSteps(record) {
+      const state = record.state;
       const currentIndex = stateIndexes[state] ?? 0;
+      const failedVerification =
+        state === "needs_human" && record.verification?.outcome === "rejected";
       elements.steps.replaceChildren(
         ...stepDefinitions.map(([key, label], index) => {
           const step = document.createElement("div");
-          const complete = index < currentIndex || (index === 5 && terminalStates.has(state));
+          const failed = failedVerification && key === "awaiting_verification";
+          const complete =
+            !failed &&
+            (index < currentIndex || (index === 5 && terminalStates.has(state)));
           step.className = "step" +
             (complete ? " complete" : "") +
+            (failed ? " failed" : "") +
             (index === currentIndex && !complete ? " current" : "");
 
           const dot = document.createElement("div");
           dot.className = "step-dot";
-          dot.textContent = complete ? "✓" : String(index + 1);
+          dot.textContent = failed ? "×" : complete ? "✓" : String(index + 1);
 
           const text = document.createElement("div");
           text.className = "step-label";
@@ -662,7 +683,7 @@ export const dashboardHtml = String.raw`<!doctype html>
       elements["agent-heading"].textContent = terminalStates.has(record.state)
         ? "Triage complete"
         : "Agent is " + humanize(record.state);
-      renderSteps(record.state);
+      renderSteps(record);
       renderEvents(record);
     }
 
@@ -694,7 +715,7 @@ export const dashboardHtml = String.raw`<!doctype html>
       }
     };
 
-    renderSteps("received");
+    renderSteps({ state: "received" });
   </script>
 </body>
 </html>`;

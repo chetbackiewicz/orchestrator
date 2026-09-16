@@ -1,0 +1,97 @@
+{
+  "input": {
+    "id": "sast",
+    "trigger": "automated",
+    "report": "/Users/chetbackiewicz/projects/cursor/orchestrator/fixtures/incident-sast.json",
+    "cwd": "/Users/chetbackiewicz/projects/cursor/emerald-osprey"
+  },
+  "state": "escalated",
+  "totalTokens": 240,
+  "requestIds": [
+    "stub-req-1",
+    "stub-req-2"
+  ],
+  "events": [
+    {
+      "at": "2026-09-16T05:31:40.501Z",
+      "kind": "assessing",
+      "detail": ""
+    },
+    {
+      "at": "2026-09-16T05:31:40.501Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"started\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.502Z",
+      "kind": "event:thinking",
+      "detail": "{\"type\":\"thinking\",\"text\":\"Matched stub script: Decide the autonomy ceiling\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.502Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_incident\",\"status\":\"running\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_incident\",\"status\":\"completed\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:assistant",
+      "detail": "{\"type\":\"assistant\",\"text\":\"```json\\n{\\n  \\\"type\\\": \\\"sast-critical\\\",\\n  \\\"severity\\\": \\\"critical\\\",\\n  \\\"autonomy\\\": \\\"escalate_only\\\",\\n  \\\"rationale\\\": \\\"Security-sensitive change requiring human judgment; must not be auto-fixed unattended.\\\"\\n}\\n```\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"finished\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"started\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:thinking",
+      "detail": "{\"type\":\"thinking\",\"text\":\"Matched stub script: evidence packet\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_file\",\"status\":\"running\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_file\",\"status\":\"completed\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:assistant",
+      "detail": "{\"type\":\"assistant\",\"text\":\"```json\\n{\\n  \\\"status\\\": \\\"declined\\\",\\n  \\\"summary\\\": \\\"Likely auth-boundary issue in session handling; gathered affected paths and a suggested fix approach for human review.\\\",\\n  \\\"recommendedMitigation\\\": \\\"Assign to security on-call; do not merge automatically.\\\"\\n}\\n```\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"finished\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:40.504Z",
+      "kind": "escalated",
+      "detail": "Likely auth-boundary issue in session handling; gathered affected paths and a suggested fix approach for human review."
+    }
+  ],
+  "assessment": {
+    "type": "sast-critical",
+    "severity": "critical",
+    "autonomy": "escalate_only",
+    "rationale": "Security-sensitive change requiring human judgment; must not be auto-fixed unattended."
+  },
+  "claim": {
+    "status": "declined",
+    "summary": "Likely auth-boundary issue in session handling; gathered affected paths and a suggested fix approach for human review.",
+    "recommendedMitigation": "Assign to security on-call; do not merge automatically."
+  }
+}

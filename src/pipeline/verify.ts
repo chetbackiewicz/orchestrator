@@ -391,12 +391,12 @@ function runCommand(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      const detail = trimOutput ? output.trim() : output;
       finish({
         passed: !timedOut && code === 0,
         detail: timedOut
           ? `Timed out after ${timeoutMs}ms`
-          : (trimOutput ? output.trim() : output) ||
-            `Exited with code ${code ?? "unknown"}`,
+          : detail || (code === 0 ? "" : `Exited with code ${code ?? "unknown"}`),
       });
     });
   });

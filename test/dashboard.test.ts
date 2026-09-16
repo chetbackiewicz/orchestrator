@@ -37,6 +37,8 @@ describe("TriageDashboardServer", () => {
 
     expect(page).toContain("<title>Incident triage</title>");
     expect(page).toContain("color-scheme: dark");
+    expect(page).toContain('record.verification?.outcome === "rejected"');
+    expect(page).toContain('dot.textContent = failed ? "×"');
     expect(state.record).toMatchObject({
       state: "investigating",
       input: { id: "incident-demo" },

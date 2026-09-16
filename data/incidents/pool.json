@@ -1,0 +1,160 @@
+{
+  "input": {
+    "id": "pool",
+    "trigger": "automated",
+    "report": "/Users/chetbackiewicz/projects/cursor/orchestrator/fixtures/incident-pool.json",
+    "cwd": "/Users/chetbackiewicz/projects/cursor/emerald-osprey"
+  },
+  "state": "verified_fixed",
+  "totalTokens": 360,
+  "requestIds": [
+    "stub-req-1",
+    "stub-req-2",
+    "stub-req-3"
+  ],
+  "events": [
+    {
+      "at": "2026-09-16T05:31:39.850Z",
+      "kind": "assessing",
+      "detail": ""
+    },
+    {
+      "at": "2026-09-16T05:31:39.851Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"started\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.851Z",
+      "kind": "event:thinking",
+      "detail": "{\"type\":\"thinking\",\"text\":\"Matched stub script: Decide the autonomy ceiling\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.851Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_incident\",\"status\":\"running\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.853Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"read_incident\",\"status\":\"completed\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "event:assistant",
+      "detail": "{\"type\":\"assistant\",\"text\":\"```json\\n{\\n  \\\"type\\\": \\\"connection-pool-exhaustion\\\",\\n  \\\"severity\\\": \\\"critical\\\",\\n  \\\"autonomy\\\": \\\"auto_fix\\\",\\n  \\\"rationale\\\": \\\"Recent deploy leaks a DB connection; bounded code fix. Rollback recommended but not executed.\\\"\\n}\\n```\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"finished\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "investigating",
+      "detail": ""
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"started\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "event:thinking",
+      "detail": "{\"type\":\"thinking\",\"text\":\"Matched stub script: root-cause hypothesis\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.854Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"recent_commits\",\"status\":\"running\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.874Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"recent_commits\",\"status\":\"completed\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.874Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"db_pool_status\",\"status\":\"running\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.909Z",
+      "kind": "event:tool_call",
+      "detail": "{\"type\":\"tool_call\",\"name\":\"db_pool_status\",\"status\":\"completed\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.909Z",
+      "kind": "event:assistant",
+      "detail": "{\"type\":\"assistant\",\"text\":\"```json\\n{\\n  \\\"rootCause\\\": \\\"Successful /recommendations responses never release the borrowed pool lease after the empty-tackle 404 branch dropped finally.\\\",\\n  \\\"offendingCommit\\\": \\\"266644b\\\",\\n  \\\"suspectFiles\\\": [\\n    \\\"src/app.ts\\\"\\n  ],\\n  \\\"proposedFix\\\": \\\"Release the connection in finally so every path returns the handle.\\\"\\n}\\n```\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.909Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"finished\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "acting",
+      "detail": ""
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"started\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "event:thinking",
+      "detail": "{\"type\":\"thinking\",\"text\":\"Matched stub script: durable fix\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "event:assistant",
+      "detail": "{\"type\":\"assistant\",\"text\":\"```json\\n{\\n  \\\"status\\\": \\\"fixed\\\",\\n  \\\"branch\\\": \\\"fix/pool-release-finally\\\",\\n  \\\"testPath\\\": \\\"test/incident-pool.test.ts\\\",\\n  \\\"summary\\\": \\\"Release connection in finally; added a concurrent-load regression test.\\\",\\n  \\\"recommendedMitigation\\\": \\\"Roll back the deploy that introduced the leak until this fix ships.\\\"\\n}\\n```\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "event:status",
+      "detail": "{\"type\":\"status\",\"status\":\"finished\"}"
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "awaiting_verification",
+      "detail": ""
+    },
+    {
+      "at": "2026-09-16T05:31:39.910Z",
+      "kind": "verified_fixed",
+      "detail": "repro before (HEAD): FAIL — synthetic fail at HEAD (test/incident-pool.test.ts)\nrepro after (fix/pool-release-finally): PASS — synthetic pass at fix/pool-release-finally (test/incident-pool.test.ts)\nfull suite (fix/pool-release-finally): PASS — synthetic pass at fix/pool-release-finally (full suite)"
+    }
+  ],
+  "assessment": {
+    "type": "connection-pool-exhaustion",
+    "severity": "critical",
+    "autonomy": "auto_fix",
+    "rationale": "Recent deploy leaks a DB connection; bounded code fix. Rollback recommended but not executed."
+  },
+  "hypothesis": {
+    "rootCause": "Successful /recommendations responses never release the borrowed pool lease after the empty-tackle 404 branch dropped finally.",
+    "offendingCommit": "266644b",
+    "suspectFiles": [
+      "src/app.ts"
+    ],
+    "proposedFix": "Release the connection in finally so every path returns the handle."
+  },
+  "claim": {
+    "status": "fixed",
+    "branch": "fix/pool-release-finally",
+    "testPath": "test/incident-pool.test.ts",
+    "summary": "Release connection in finally; added a concurrent-load regression test.",
+    "recommendedMitigation": "Roll back the deploy that introduced the leak until this fix ships."
+  },
+  "verification": {
+    "outcome": "verified",
+    "reproFailedBeforeFix": true,
+    "reproPassedAfterFix": true,
+    "fullSuitePassed": true,
+    "detail": "repro before (HEAD): FAIL — synthetic fail at HEAD (test/incident-pool.test.ts)\nrepro after (fix/pool-release-finally): PASS — synthetic pass at fix/pool-release-finally (test/incident-pool.test.ts)\nfull suite (fix/pool-release-finally): PASS — synthetic pass at fix/pool-release-finally (full suite)"
+  }
+}

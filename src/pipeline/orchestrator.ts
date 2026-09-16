@@ -1,4 +1,5 @@
 import { AgentRunner, AgentSession, RunEvent, RunResult } from "../agent/runner.js";
+import { IncidentPublisher } from "../publisher/incident-publisher.js";
 import { makeIncidentTools } from "../tools/incident-tools.js";
 import {
   actPrompt,
@@ -27,6 +28,7 @@ export interface OrchestratorConfig {
   verifyDeps?: (cwd: string) => VerifyDeps;
   onEvent?: (incidentId: string, event: RunEvent) => void;
   onStateChange?: (record: IncidentRecord) => void;
+  publisher?: IncidentPublisher;
   now?: () => string;
 }
 
@@ -43,15 +45,34 @@ export async function triageIncident(
     events: [],
   };
   const now = config.now ?? (() => new Date().toISOString());
+  let session: AgentSession | undefined;
+  const disposeSession = async () => {
+    const activeSession = session;
+    session = undefined;
+    await activeSession?.dispose();
+  };
   const move = (to: IncidentState, detail = "") => {
     assertTransition(record.state, to);
     record.state = to;
     record.events.push({ at: now(), kind: to, detail });
     config.onStateChange?.(record);
   };
-
+  const finish = async (): Promise<IncidentRecord> => {
+    if (!config.publisher || !isTerminalState(record.state)) return record;
+    await disposeSession();
+    try {
+      record.publication = await config.publisher.publish(record);
+    } catch (error) {
+      record.publication = {
+        status: "failed",
+        baseBranch: config.publisher.baseBranch,
+        error: formatError(error),
+      };
+    }
+    config.onStateChange?.(record);
+    return record;
+  };
   config.onStateChange?.(record);
-  let session: AgentSession | undefined;
   try {
     const activeSession = await runner.open({
       cwd: input.cwd,
@@ -125,7 +146,7 @@ export async function triageIncident(
       parseAssessment,
     );
     record.assessment = assessment.value;
-    if (stopForBudget()) return record;
+    if (stopForBudget()) return finish();
 
     if (record.assessment.autonomy === "escalate_only") {
       const evidence = await parseStage(
@@ -134,9 +155,9 @@ export async function triageIncident(
         parseFixClaim,
       );
       record.claim = evidence.value;
-      if (stopForBudget()) return record;
+      if (stopForBudget()) return finish();
       move("escalated", record.claim.summary);
-      return record;
+      return finish();
     }
 
     move("investigating");
@@ -146,7 +167,7 @@ export async function triageIncident(
       parseHypothesis,
     );
     record.hypothesis = hypothesis.value;
-    if (stopForBudget()) return record;
+    if (stopForBudget()) return finish();
 
     move("acting");
     const claim = await parseStage(
@@ -158,11 +179,11 @@ export async function triageIncident(
     if (!record.claim.branch && claim.result.branch) {
       record.claim.branch = claim.result.branch;
     }
-    if (stopForBudget()) return record;
+    if (stopForBudget()) return finish();
 
     if (record.claim.status !== "fixed") {
       move("escalated", `Agent did not fix incident: ${record.claim.summary}`);
-      return record;
+      return finish();
     }
 
     move("awaiting_verification");
@@ -177,14 +198,14 @@ export async function triageIncident(
     } else {
       move("needs_human", record.verification.detail);
     }
-    return record;
+    return finish();
   } catch (error) {
     if (!isTerminalState(record.state)) {
       move("failed", formatError(error));
     }
-    return record;
+    return finish();
   } finally {
-    await session?.dispose();
+    await disposeSession();
   }
 }
 

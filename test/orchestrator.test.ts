@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentRunner, OpenSessionOptions } from "../src/agent/runner.js";
 import { StubAgentRunner, StubScript } from "../src/agent/stub-runner.js";
 import { triageIncident } from "../src/pipeline/orchestrator.js";
+import { IncidentPublisher } from "../src/publisher/incident-publisher.js";
 import { VerifyDeps } from "../src/pipeline/verify.js";
 
 const input = {
@@ -72,7 +73,11 @@ const verified: VerifyDeps = {
     };
   },
   async validateChangedFiles() {
-    return { passed: true, detail: "clean" };
+    return {
+      passed: true,
+      detail: "clean",
+      changedFiles: ["src/season.ts", "test/season.test.ts"],
+    };
   },
 };
 
@@ -189,5 +194,31 @@ describe("triageIncident", () => {
     });
     expect(record.state).toBe("failed");
     expect(record.events.at(-1)?.detail).toBe("runner unavailable");
+  });
+
+  it("records publisher failures without weakening the verified outcome", async () => {
+    const publisher: IncidentPublisher = {
+      baseBranch: "main",
+      async publish() {
+        throw new Error("gh authentication failed");
+      },
+    };
+    const record = await triageIncident(
+      input,
+      new StubAgentRunner(() => successfulScripts()),
+      {
+        maxTokensPerIncident: 100,
+        preFixRef: "before",
+        verifyDeps: () => verified,
+        publisher,
+      },
+    );
+
+    expect(record.state).toBe("verified_fixed");
+    expect(record.publication).toEqual({
+      status: "failed",
+      baseBranch: "main",
+      error: "gh authentication failed",
+    });
   });
 });

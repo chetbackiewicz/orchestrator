@@ -41,6 +41,20 @@ export interface VerificationResult {
   reproPassedAfterFix: boolean;
   fullSuitePassed: boolean;
   detail: string;
+  verifiedPaths?: string[];
+}
+
+export interface PublicationMetadata {
+  status: "published" | "issue_only" | "failed";
+  repository?: string;
+  baseBranch: string;
+  commitSha?: string;
+  branch?: string;
+  prUrl?: string;
+  prNumber?: number;
+  issueUrl?: string;
+  issueNumber?: number;
+  error?: string;
 }
 
 export interface IncidentInput {
@@ -66,4 +80,5 @@ export interface IncidentRecord {
   hypothesis?: Hypothesis;
   claim?: FixClaim;
   verification?: VerificationResult;
+  publication?: PublicationMetadata;
 }

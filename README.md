@@ -70,6 +70,26 @@ npm run triage -- \
   --publish-base main
 ```
 
+Add `--dashboard` to expose a live, dark-themed browser dashboard at
+`http://127.0.0.1:4317`. It displays the current triage stage, streaming agent
+activity, severity, autonomy decision, token usage, findings, and terminal
+outcome. The dashboard remains available after triage completes until the
+process is stopped:
+
+```bash
+npm run triage -- \
+  --id incident-season \
+  --trigger manual \
+  --report "users report an incorrect season-open recommendation" \
+  --cwd ../emerald-osprey \
+  --pre-fix-ref main \
+  --dashboard
+```
+
+Use `--dashboard-port 4400`, `INCIDENT_DASHBOARD=true`, or
+`INCIDENT_DASHBOARD_PORT=4400` to change how it is enabled. The server binds to
+localhost only.
+
 The publisher derives `owner/repository` from the target repository's `origin`
 remote. Use `--github-repo owner/repository` or `--github-remote upstream` when
 derivation is not appropriate. `INCIDENT_PUBLISH=true` provides the equivalent

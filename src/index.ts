@@ -1,5 +1,6 @@
 export * from "./agent/index.js";
 export * from "./config/cli-config.js";
+export * from "./dashboard/server.js";
 export * from "./pipeline/orchestrator.js";
 export * from "./pipeline/change-policy.js";
 export * from "./pipeline/schemas.js";

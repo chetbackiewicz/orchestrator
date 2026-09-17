@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     process.stderr.write(`Triage dashboard: ${url}\n`);
   }
   const record = await triageIncident(input, runner, {
-    maxTokensPerIncident: optionalNumber(args, "max-tokens") ?? 1_000_000,
+    maxTokensPerIncident: optionalNumber(args, "max-tokens") ?? 1_200_000,
     preFixRef: required(args, "pre-fix-ref"),
     onEvent: (incidentId, event) => {
       dashboard?.publishAgentEvent(incidentId, event);

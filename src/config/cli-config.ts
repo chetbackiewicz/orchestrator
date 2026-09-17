@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { resolve } from "node:path";
 
 export type CliArgs = Map<string, string | true>;
 
@@ -22,6 +23,19 @@ export interface QueueWorkerCliConfig {
   heartbeatIntervalMs: number;
   workerId: string;
 }
+
+export type WorkspaceCliConfig =
+  | {
+      mode: "fixed";
+      cwd: string;
+      preFixRef: string;
+    }
+  | {
+      mode: "managed";
+      repoRoot: string;
+      workspaceRoot: string;
+      targetRef: string;
+    };
 
 export function parseArgs(values: string[]): CliArgs {
   const args: CliArgs = new Map();
@@ -137,6 +151,59 @@ export function queueWorkerConfig(
     leaseSeconds,
     heartbeatIntervalMs,
     workerId,
+  };
+}
+
+export function workspaceConfig(
+  args: CliArgs,
+  env: NodeJS.ProcessEnv,
+  launchCwd = process.cwd(),
+  defaultTargetRef = "origin/main",
+): WorkspaceCliConfig {
+  const cwd = optionalString(args, "cwd") ?? env.INCIDENT_TARGET_CWD;
+  const repoRoot =
+    optionalString(args, "repo-root") ?? env.INCIDENT_REPO_ROOT;
+  if (cwd && repoRoot) {
+    throw new Error("Use either --cwd or --repo-root, not both");
+  }
+  if (!cwd && !repoRoot) {
+    throw new Error(
+      "Missing target workspace: use --cwd or --repo-root",
+    );
+  }
+
+  const preFixRef =
+    optionalString(args, "pre-fix-ref") ?? env.INCIDENT_PRE_FIX_REF;
+  const targetRef =
+    optionalString(args, "target-ref") ?? env.INCIDENT_TARGET_REF;
+  if (cwd) {
+    if (targetRef) {
+      throw new Error("--target-ref is only valid with --repo-root");
+    }
+    if (!preFixRef) {
+      throw new Error(
+        "Missing pre-fix ref: use --pre-fix-ref with --cwd",
+      );
+    }
+    return {
+      mode: "fixed",
+      cwd: resolve(launchCwd, cwd),
+      preFixRef,
+    };
+  }
+
+  if (preFixRef) {
+    throw new Error("--pre-fix-ref is only valid with --cwd");
+  }
+  const workspaceRoot =
+    optionalString(args, "workspace-root") ??
+    env.INCIDENT_WORKSPACE_ROOT ??
+    resolve(launchCwd, ".incident-orchestrator", "worktrees");
+  return {
+    mode: "managed",
+    repoRoot: resolve(launchCwd, repoRoot!),
+    workspaceRoot: resolve(launchCwd, workspaceRoot),
+    targetRef: targetRef ?? defaultTargetRef,
   };
 }
 

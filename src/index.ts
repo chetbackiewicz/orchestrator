@@ -12,3 +12,4 @@ export * from "./queue/client.js";
 export * from "./queue/worker.js";
 export * from "./store/json-store.js";
 export * from "./tools/incident-tools.js";
+export * from "./workspace/manager.js";

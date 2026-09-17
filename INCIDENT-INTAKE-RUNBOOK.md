@@ -67,30 +67,22 @@ INCIDENT_HEARTBEAT_INTERVAL_MS=30000
 `INCIDENT_WORKER_ID` is optional. When omitted, the orchestrator generates a
 unique worker ID. Do not commit `.env`.
 
-## 3. Create an isolated triage target
+## 3. Prepare the Emerald repository
 
-Keep the Emerald checkout that serves the website separate from the checkout
-the agent changes. This allows the website and durable issue queue to remain
-available while triage switches branches and publishes a fix.
-
-For the seeded season-boundary demo:
+Keep the Emerald checkout that serves the website stable. The orchestrator
+creates a separate attempt-scoped branch and worktree for every claimed
+incident. Install dependencies in the stable repository because managed
+worktrees link its `node_modules`:
 
 ```bash
 cd /path/to/emerald-osprey
 git fetch origin
-git worktree add --detach ../emerald-osprey-incident-target demo/incident-season
-cd ../emerald-osprey-incident-target
 npm install
-```
-
-The target must be clean before starting:
-
-```bash
 git status --short
 ```
 
-Use another known failing ref instead of `demo/incident-season` when testing a
-different incident. Pass that same ref to `--pre-fix-ref` below.
+The checkout should be clean. It remains on its current branch while incident
+work occurs under the orchestrator's managed workspace root.
 
 ## 4. Start Emerald Osprey
 
@@ -124,14 +116,29 @@ In terminal 2, from the orchestrator checkout:
 cd /path/to/orchestrator
 npm run worker -- \
   --queue-url http://127.0.0.1:3000 \
-  --cwd /path/to/emerald-osprey-incident-target \
-  --pre-fix-ref demo/incident-season \
+  --repo-root /path/to/emerald-osprey \
+  --workspace-root /path/to/incident-worktrees \
+  --target-ref demo/incident-season \
   --dashboard \
   --dashboard-port 4317
 ```
 
 The worker loads `.env`, uses the Cursor runner, polls one incident at a time,
-and publishes verified outcomes to `chetbackiewicz/emerald-osprey`.
+creates an isolated workspace from the immutable commit resolved by
+`--target-ref`, and publishes verified outcomes to
+`chetbackiewicz/emerald-osprey`. For normal incidents use `origin/main` instead
+of the seeded demo ref.
+
+The previous manual mode remains available when a specific existing worktree is
+required:
+
+```bash
+npm run worker -- \
+  --queue-url http://127.0.0.1:3000 \
+  --cwd /path/to/existing/emerald-worktree \
+  --pre-fix-ref demo/incident-season \
+  --dashboard
+```
 
 Open the live dashboard:
 
@@ -190,7 +197,8 @@ verified_fixed
 
 For a verified fix, the orchestrator independently checks:
 
-1. The new reproduction test fails at `--pre-fix-ref`.
+1. The new reproduction test fails at the immutable commit resolved from
+   `--target-ref` (or at `--pre-fix-ref` in manual mode).
 2. The reproduction test passes with the agent's changes.
 3. The complete Emerald test suite passes with the agent's changes.
 
@@ -203,7 +211,7 @@ shows only the user-facing status, concise outcome, and publication links.
 A `verified_fixed` incident should:
 
 1. Commit only the independently verified files.
-2. Push `incident-fix/<incident-id>`.
+2. Push the attempt-scoped `incident-fix/<identity>-attempt-<number>` branch.
 3. Open a pull request against `main`.
 4. Create or update the matching GitHub issue.
 5. Return both URLs to the Emerald incident result.
@@ -229,21 +237,39 @@ After a terminal result, select **Resume polling** on the orchestrator
 dashboard. This clears only the displayed record; it does not requeue or alter
 the completed Emerald issue.
 
-Restore or create a clean failing target before submitting another copy of the
-same incident. Do not reuse a checkout containing the previously published
-fix.
+Managed mode creates a fresh attempt-scoped workspace for the next claim. If a
+previous failed workspace was preserved, inspect or remove it separately; it
+will not be reused by a later queue attempt.
 
 ## 10. Stop and clean up
 
 Stop the worker and Emerald server with `Ctrl+C` in their terminals.
 
-After all desired changes are safely published and the target worktree is
-clean:
+Successfully published managed worktrees are removed automatically only after
+Emerald acknowledges the completion callback. Clean read-only outcomes are
+also removed. Failed workspaces, workspaces with uncommitted changes, and
+workspaces with unpublished commits are preserved; the worker logs the exact
+path for inspection.
+
+List all Emerald worktrees with:
 
 ```bash
 cd /path/to/emerald-osprey
-git worktree remove ../emerald-osprey-incident-target
-git worktree prune
+git worktree list
 ```
 
-Do not remove a worktree that contains uncommitted work you intend to keep.
+Run conservative orchestrator cleanup with:
+
+```bash
+cd /path/to/orchestrator
+npm run workspace:cleanup -- \
+  --repo-root /path/to/emerald-osprey \
+  --workspace-root /path/to/incident-worktrees \
+  --target-ref demo/incident-season
+```
+
+The command removes only clean managed worktrees with no unpublished commits.
+It reports and preserves dirty or unpublished workspaces.
+
+Remove a preserved worktree only after deciding that its changes and commits
+are no longer needed. Never recursively delete the managed workspace root.

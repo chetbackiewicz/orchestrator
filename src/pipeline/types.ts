@@ -62,6 +62,7 @@ export interface IncidentInput {
   trigger: Trigger;
   report: string;
   cwd: string;
+  workspaceBranch?: string;
 }
 
 export interface IncidentEvent {

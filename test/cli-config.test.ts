@@ -4,6 +4,7 @@ import {
   parseArgs,
   publishingConfig,
   queueWorkerConfig,
+  workspaceConfig,
 } from "../src/config/cli-config.js";
 
 describe("publishing CLI configuration", () => {
@@ -162,6 +163,95 @@ describe("publishing CLI configuration", () => {
           {},
         ),
       ).toThrow("shorter than the incident lease");
+    });
+  });
+
+  describe("workspace CLI configuration", () => {
+    it("supports the existing fixed workspace mode", () => {
+      expect(
+        workspaceConfig(
+          parseArgs([
+            "--cwd",
+            "../emerald-target",
+            "--pre-fix-ref",
+            "demo/incident-season",
+          ]),
+          {},
+          "/orchestrator",
+        ),
+      ).toEqual({
+        mode: "fixed",
+        cwd: "/emerald-target",
+        preFixRef: "demo/incident-season",
+      });
+    });
+
+    it("configures managed worktrees with safe defaults", () => {
+      expect(
+        workspaceConfig(
+          parseArgs(["--repo-root", "../emerald-osprey"]),
+          {},
+          "/orchestrator",
+          "upstream/release",
+        ),
+      ).toEqual({
+        mode: "managed",
+        repoRoot: "/emerald-osprey",
+        workspaceRoot: "/orchestrator/.incident-orchestrator/worktrees",
+        targetRef: "upstream/release",
+      });
+    });
+
+    it("supports managed workspace environment overrides", () => {
+      expect(
+        workspaceConfig(
+          parseArgs([]),
+          {
+            INCIDENT_REPO_ROOT: "/repos/emerald-osprey",
+            INCIDENT_WORKSPACE_ROOT: "/workspaces/incidents",
+            INCIDENT_TARGET_REF: "origin/staging",
+          },
+          "/orchestrator",
+        ),
+      ).toEqual({
+        mode: "managed",
+        repoRoot: "/repos/emerald-osprey",
+        workspaceRoot: "/workspaces/incidents",
+        targetRef: "origin/staging",
+      });
+    });
+
+    it("rejects ambiguous or incomplete workspace modes", () => {
+      expect(() =>
+        workspaceConfig(
+          parseArgs([
+            "--cwd",
+            "/target",
+            "--repo-root",
+            "/repo",
+            "--pre-fix-ref",
+            "main",
+          ]),
+          {},
+        ),
+      ).toThrow("Use either --cwd or --repo-root");
+      expect(() => workspaceConfig(parseArgs([]), {})).toThrow(
+        "Missing target workspace",
+      );
+      expect(() =>
+        workspaceConfig(parseArgs(["--cwd", "/target"]), {}),
+      ).toThrow("Missing pre-fix ref");
+      expect(() =>
+        workspaceConfig(
+          parseArgs([
+            "--repo-root",
+            "/repo",
+            "--pre-fix-ref",
+            "main",
+          ]),
+          {},
+        ),
+      ).toThrow("--pre-fix-ref is only valid with --cwd");
     });
   });
 });

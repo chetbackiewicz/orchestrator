@@ -17,6 +17,12 @@ import {
   IncidentQueueClient,
   QueueClientError,
 } from "./client.js";
+import {
+  IncidentWorkspace,
+  IncidentWorkspaceManager,
+  WorkspaceDisposition,
+  WorkspaceReleaseResult,
+} from "../workspace/manager.js";
 
 export interface IncidentRecordStore {
   put(record: IncidentRecord): Promise<void>;
@@ -25,19 +31,23 @@ export interface IncidentRecordStore {
 export interface IncidentQueueWorkerOptions {
   client: IncidentQueueClient;
   workerId: string;
-  cwd: string;
+  workspaceManager: IncidentWorkspaceManager;
   pollIntervalMs: number;
   leaseSeconds: number;
   heartbeatIntervalMs: number;
   runner: AgentRunner;
   orchestratorConfig: Omit<
     OrchestratorConfig,
-    "onEvent" | "onStateChange"
+    "onEvent" | "onStateChange" | "preFixRef"
   >;
   store: IncidentRecordStore;
   onEvent?: (incidentId: string, event: RunEvent) => void;
   onStateChange?: (record: IncidentRecord) => void;
   onError?: (error: Error) => void;
+  onWorkspaceRelease?: (
+    workspace: IncidentWorkspace,
+    result: WorkspaceReleaseResult,
+  ) => void;
   triage?: typeof triageIncident;
   now?: () => string;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -107,11 +117,13 @@ export class IncidentQueueWorker {
       this.options.onError,
     );
     reporter.start();
+    let workspace: IncidentWorkspace | undefined;
+    let workspaceDisposition: WorkspaceDisposition = "failed";
 
     try {
-      let input: IncidentInput;
+      let payload: Omit<IncidentInput, "cwd" | "workspaceBranch">;
       try {
-        input = incidentInput(claimed, this.options.cwd);
+        payload = incidentPayload(claimed);
       } catch (error) {
         await this.sendFailure(
           claimed,
@@ -125,6 +137,32 @@ export class IncidentQueueWorker {
         return;
       }
 
+      try {
+        workspace = await this.options.workspaceManager.acquire(
+          claimed.incident.id,
+          claimed.incident.attemptCount,
+        );
+      } catch (error) {
+        await this.sendFailure(
+          claimed,
+          reporter,
+          {
+            retryable: true,
+            retryAfterSeconds: 30,
+            error: `Unable to prepare incident workspace: ${formatError(error)}`,
+          },
+          activeSignal,
+        );
+        return;
+      }
+
+      const input: IncidentInput = {
+        ...payload,
+        cwd: workspace.cwd,
+        ...(workspace.branch
+          ? { workspaceBranch: workspace.branch }
+          : {}),
+      };
       let record: IncidentRecord;
       try {
         record = await this.triage(
@@ -132,6 +170,7 @@ export class IncidentQueueWorker {
           this.options.runner,
           {
             ...this.options.orchestratorConfig,
+            preFixRef: workspace.preFixRef,
             onEvent: (incidentId, event) => {
               this.options.onEvent?.(incidentId, event);
             },
@@ -180,15 +219,33 @@ export class IncidentQueueWorker {
         outcome: "resolved",
         result: completionResult(record),
       };
-      await retryFinalCallback(
+      const acknowledged = await retryFinalCallback(
         () => this.options.client.complete(claimed.incident.id, request),
         reporter,
         this.sleep,
         activeSignal,
         this.random,
       );
+      if (acknowledged) {
+        workspaceDisposition = dispositionFor(record);
+      }
     } finally {
       await reporter.close();
+      if (workspace) {
+        try {
+          const result = await this.options.workspaceManager.release(
+            workspace,
+            workspaceDisposition,
+          );
+          this.options.onWorkspaceRelease?.(workspace, result);
+        } catch (error) {
+          this.options.onError?.(
+            new Error(
+              `Unable to release incident workspace ${workspace.cwd}: ${formatError(error)}`,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -351,10 +408,9 @@ class LeaseReporter {
   }
 }
 
-function incidentInput(
+function incidentPayload(
   claimed: ClaimedIncident,
-  cwd: string,
-): IncidentInput {
+): Omit<IncidentInput, "cwd" | "workspaceBranch"> {
   const trigger = claimed.incident.payload.trigger;
   const report = claimed.incident.payload.report;
   if (trigger !== "manual" && trigger !== "automated") {
@@ -367,8 +423,19 @@ function incidentInput(
     id: claimed.incident.id,
     trigger: trigger as Trigger,
     report,
-    cwd,
   };
+}
+
+function dispositionFor(record: IncidentRecord): WorkspaceDisposition {
+  if (record.publication?.status === "published") return "published";
+  if (
+    record.state === "failed" ||
+    record.state === "needs_human" ||
+    record.state === "budget_exceeded"
+  ) {
+    return "failed";
+  }
+  return "completed";
 }
 
 export function completionResult(

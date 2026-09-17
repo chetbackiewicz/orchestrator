@@ -202,11 +202,18 @@ export class GitHubIncidentPublisher implements IncidentPublisher {
     );
     assertSubsetPaths(existingCommittedPaths, verifiedPaths, "existing commits");
 
-    const branch = `incident-fix/${slug(record.input.id)}`;
+    const branch =
+      record.input.workspaceBranch ??
+      `incident-fix/${slug(record.input.id)}`;
     const currentBranch = (
       await this.mustRun("git", ["branch", "--show-current"], cwd)
     ).stdout.trim();
-    if (currentBranch !== branch) {
+    if (record.input.workspaceBranch && currentBranch !== branch) {
+      throw new Error(
+        `Managed workspace is on branch ${currentBranch || "(detached)"}, expected ${branch}.`,
+      );
+    }
+    if (!record.input.workspaceBranch && currentBranch !== branch) {
       const branchExists = await this.commands.run(
         "git",
         ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],

@@ -142,6 +142,23 @@ describe("triageIncident", () => {
     expect(record.claim?.branch).toBe("fix/season");
   });
 
+  it("uses the trusted managed workspace branch over agent output", async () => {
+    const record = await triageIncident(
+      {
+        ...input,
+        workspaceBranch: "incident-fix/managed-attempt-2",
+      },
+      new StubAgentRunner(() => successfulScripts()),
+      {
+        maxTokensPerIncident: 100,
+        preFixRef: "before",
+        verifyDeps: () => verified,
+      },
+    );
+
+    expect(record.claim?.branch).toBe("incident-fix/managed-attempt-2");
+  });
+
   it("never enters agent mode for escalation-only incidents", async () => {
     const scripts: StubScript[] = [
       {

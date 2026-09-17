@@ -11,6 +11,7 @@
     "test": "vitest run",
     "triage": "tsx src/cli.ts",
     "worker": "tsx src/worker-cli.ts",
+    "workspace:cleanup": "tsx src/workspace-cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

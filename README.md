@@ -99,15 +99,23 @@ queue and process one incident at a time:
 ```bash
 npm run worker -- \
   --queue-url http://127.0.0.1:3000 \
-  --cwd ../emerald-osprey \
-  --pre-fix-ref main \
+  --repo-root ../emerald-osprey \
+  --workspace-root ~/.incident-orchestrator/worktrees \
+  --target-ref origin/main \
   --dashboard
 ```
 
 The one-shot `triage` command is unchanged. The worker reuses its runner, token
 budget, verification, optional GitHub publication, JSON incident store, and
-dashboard behavior. Serial processing protects the shared target checkout,
-agent edits, verification worktrees, branches, and publication flow.
+dashboard behavior. In managed mode it creates a clean, attempt-scoped branch
+and worktree for each claimed incident. The Emerald server checkout remains
+untouched while Cursor edits, verification runs, and publication occurs in the
+managed worktree. Serial processing remains the default even though incidents
+are isolated.
+
+For backward compatibility, `--cwd <existing-worktree> --pre-fix-ref <ref>`
+keeps the original externally managed workspace mode. Do not combine `--cwd`
+with `--repo-root`.
 
 Queue settings can be supplied by flags or environment:
 
@@ -119,6 +127,11 @@ Queue settings can be supplied by flags or environment:
 | `--heartbeat-interval-ms` | `INCIDENT_HEARTBEAT_INTERVAL_MS` | `30000` |
 | `--worker-id` | `INCIDENT_WORKER_ID` | Host/PID/random identifier |
 | `--max-tokens` | — | `1000000` |
+| `--repo-root` | `INCIDENT_REPO_ROOT` | Required unless `--cwd` is used |
+| `--workspace-root` | `INCIDENT_WORKSPACE_ROOT` | `.incident-orchestrator/worktrees` under the launch directory |
+| `--target-ref` | `INCIDENT_TARGET_REF` | Publication remote/base, normally `origin/main` |
+| `--cwd` | `INCIDENT_TARGET_CWD` | Legacy fixed-workspace mode |
+| `--pre-fix-ref` | `INCIDENT_PRE_FIX_REF` | Required with `--cwd` |
 
 The heartbeat interval must be shorter than the lease. Queue transport and 5xx
 failures use bounded exponential backoff; invalid contracts and permanent 4xx
@@ -179,6 +192,26 @@ including a pipeline-recorded `failed` state, are completed processing results.
 The failure endpoint is reserved for worker infrastructure, invalid ticket, or
 persistence failures.
 
+Managed workspace names include a sanitized incident ID, a hash of the full ID,
+and the queue attempt number. Each workspace starts from an immutable commit SHA
+resolved from `--target-ref`. The manager links the target repository's existing
+`node_modules`, so install dependencies in `--repo-root` before starting the
+worker. Successfully published workspaces are removed only after Emerald
+acknowledges completion. Clean read-only outcomes are also removed. Workspaces
+with uncommitted changes, unpublished commits, failed triage, lost callbacks, or
+other uncertain state are preserved and their paths are logged for diagnosis.
+Run conservative cleanup later with the same managed workspace configuration:
+
+```bash
+npm run workspace:cleanup -- \
+  --repo-root ../emerald-osprey \
+  --workspace-root ~/.incident-orchestrator/worktrees \
+  --target-ref origin/main
+```
+
+Cleanup removes only clean managed worktrees that contain no unpublished local
+commits. Dirty or unpublished workspaces are reported and preserved.
+
 The publisher derives `owner/repository` from the target repository's `origin`
 remote. Use `--github-repo owner/repository` or `--github-remote upstream` when
 derivation is not appropriate. `INCIDENT_PUBLISH=true` provides the equivalent
@@ -215,8 +248,10 @@ For `verified_fixed`, the host-side publisher:
    dependency manifests, and lockfiles.
 2. Stages only the verified source paths and the single new reproduction test.
 3. Creates a deterministic commit when verified changes are still uncommitted.
-4. Pushes `incident-fix/<incident-id>` and opens a pull request targeting
-   `main` (or `--publish-base`). It never pushes directly to or merges the base.
+4. Pushes the managed attempt-scoped `incident-fix/<identity>-attempt-<number>`
+   branch (or `incident-fix/<incident-id>` in fixed mode) and opens a pull
+   request targeting `main` (or `--publish-base`). It never pushes directly to
+   or merges the base.
 5. Creates an incident issue containing the report, assessment/autonomy
    decision, root-cause hypothesis and offending commit, fix and verification
    evidence, commit/branch/PR, request IDs, token usage, and state history.
@@ -241,6 +276,7 @@ src/
   queue/       typed Emerald HTTP client and serial lease-aware worker
   store/       atomic JSON incident persistence
   tools/       in-process investigation tools
+  workspace/   trusted per-incident Git worktree lifecycle management
   cli.ts       command-line entry point
   worker-cli.ts long-running Emerald incident queue entry point
 ```

@@ -9,7 +9,7 @@ export interface DashboardServerOptions {
 }
 
 type DashboardMessage =
-  | { kind: "snapshot"; record: IncidentRecord }
+  | { kind: "snapshot"; record: IncidentRecord | null }
   | {
       kind: "agent_event";
       incidentId: string;
@@ -67,6 +67,17 @@ export class TriageDashboardServer {
           writeSse(response, { kind: "snapshot", record: this.record });
         }
         request.on("close", () => this.clients.delete(response));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        requestUrl.pathname === "/api/reset"
+      ) {
+        this.record = undefined;
+        this.broadcast({ kind: "snapshot", record: null });
+        response.writeHead(204);
+        response.end();
         return;
       }
 
@@ -231,6 +242,24 @@ export const dashboardHtml = String.raw`<!doctype html>
     .connection.live .connection-dot { background: var(--green); }
     .connection.offline .connection-dot { background: var(--red); }
 
+    .reset-button {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid rgba(124, 92, 255, 0.55);
+      border-radius: 9px;
+      background: var(--accent-soft);
+      color: #ded8ff;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .reset-button.visible { display: inline-flex; }
+
     .panel {
       border: 1px solid var(--border);
       border-radius: 16px;
@@ -334,7 +363,7 @@ export const dashboardHtml = String.raw`<!doctype html>
       margin-top: 16px;
     }
 
-    .activity, .summary { min-height: 330px; }
+    .activity, .summary { min-height: 260px; }
 
     .activity {
       display: flex;
@@ -373,32 +402,6 @@ export const dashboardHtml = String.raw`<!doctype html>
       margin-top: 2px;
       color: var(--muted);
       overflow-wrap: anywhere;
-    }
-
-    .event-list {
-      min-height: 0;
-      margin: 0;
-      padding: 0;
-      overflow-y: auto;
-      list-style: none;
-    }
-
-    .event-list li {
-      display: grid;
-      grid-template-columns: 78px 1fr;
-      gap: 12px;
-      padding: 9px 2px;
-      border-top: 1px solid rgba(37, 44, 56, 0.7);
-    }
-
-    .event-time {
-      color: var(--muted);
-      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-
-    .event-kind {
-      font-weight: 650;
-      text-transform: capitalize;
     }
 
     .summary { padding: 22px; }
@@ -472,13 +475,16 @@ export const dashboardHtml = String.raw`<!doctype html>
     <header>
       <div>
         <div class="eyebrow">Agent operations</div>
-        <h1 id="incident-title">Waiting for triage</h1>
-        <p id="report">The dashboard will update as soon as an incident starts.</p>
+        <h1>Incident Triage</h1>
+        <p id="incident-title">Waiting for an incident.</p>
       </div>
       <div id="connection" class="connection">
         <span class="connection-dot"></span>
         <span id="connection-label">Connecting</span>
       </div>
+      <button id="reset-dashboard" class="reset-button" type="button">
+        Resume polling
+      </button>
     </header>
 
     <section class="panel progress-panel">
@@ -501,7 +507,6 @@ export const dashboardHtml = String.raw`<!doctype html>
             <div id="agent-event">No activity received yet.</div>
           </div>
         </div>
-        <ol id="events" class="event-list"></ol>
       </section>
 
       <aside class="panel summary">
@@ -564,14 +569,13 @@ export const dashboardHtml = String.raw`<!doctype html>
     };
     const elements = Object.fromEntries(
       [
-        "incident-title", "report", "connection", "connection-label", "status",
-        "steps", "agent-heading", "agent-event", "events", "severity",
-        "autonomy", "tokens", "requests", "finding",
+        "incident-title", "connection", "connection-label", "status",
+        "steps", "agent-heading", "agent-event", "severity",
+        "autonomy", "tokens", "requests", "finding", "reset-dashboard",
       ].map((id) => [id, document.getElementById(id)]),
     );
 
     let currentRecord = null;
-    let liveEvents = [];
 
     function humanize(value) {
       return String(value ?? "—").replaceAll("_", " ");
@@ -621,38 +625,24 @@ export const dashboardHtml = String.raw`<!doctype html>
       return event.text ?? event.status ?? event.type;
     }
 
-    function renderEvents(record) {
-      const stateEvents = (record?.events ?? []).map((event) => ({
-        at: event.at,
-        kind: humanize(event.kind.replace("event:", "")),
-        detail: event.detail,
-      }));
-      const combined = [...stateEvents, ...liveEvents]
-        .sort((left, right) => left.at.localeCompare(right.at))
-        .slice(-50)
-        .reverse();
-
-      elements.events.replaceChildren(
-        ...combined.map((event) => {
-          const row = document.createElement("li");
-          const time = document.createElement("span");
-          time.className = "event-time";
-          time.textContent = new Date(event.at).toLocaleTimeString();
-          const description = document.createElement("span");
-          description.className = "event-kind";
-          description.textContent = event.kind;
-          description.title = event.detail;
-          row.append(time, description);
-          return row;
-        }),
-      );
-    }
-
     function render(record) {
-      if (!record) return;
+      if (!record) {
+        currentRecord = null;
+        elements["incident-title"].textContent = "Waiting for an incident.";
+        elements.status.textContent = "polling";
+        elements.severity.textContent = "—";
+        elements.autonomy.textContent = "—";
+        elements.tokens.textContent = "0";
+        elements.requests.textContent = "0";
+        elements.finding.textContent = "Assessment has not started.";
+        elements["agent-heading"].textContent = "Waiting for agent";
+        elements["agent-event"].textContent = "No activity received yet.";
+        elements["reset-dashboard"].classList.remove("visible");
+        renderSteps("received");
+        return;
+      }
       currentRecord = record;
-      elements["incident-title"].textContent = record.input.id;
-      elements.report.textContent = record.input.report;
+      elements["incident-title"].textContent = "Incident " + record.input.id;
       elements.status.textContent = humanize(record.state);
       elements.severity.textContent = humanize(record.assessment?.severity);
       elements.autonomy.textContent = humanize(record.assessment?.autonomy);
@@ -662,9 +652,26 @@ export const dashboardHtml = String.raw`<!doctype html>
       elements["agent-heading"].textContent = terminalStates.has(record.state)
         ? "Triage complete"
         : "Agent is " + humanize(record.state);
+      elements["agent-event"].textContent = terminalStates.has(record.state)
+        ? "No active agent operation."
+        : "Waiting for live activity.";
+      elements["reset-dashboard"].classList.toggle(
+        "visible",
+        terminalStates.has(record.state),
+      );
       renderSteps(record.state);
-      renderEvents(record);
     }
+
+    elements["reset-dashboard"].addEventListener("click", async () => {
+      elements["reset-dashboard"].disabled = true;
+      try {
+        const response = await fetch("/api/reset", { method: "POST" });
+        if (!response.ok) throw new Error("Unable to reset dashboard");
+        render(null);
+      } finally {
+        elements["reset-dashboard"].disabled = false;
+      }
+    });
 
     fetch("/api/state")
       .then((response) => response.json())
@@ -684,13 +691,6 @@ export const dashboardHtml = String.raw`<!doctype html>
         const detail = eventDescription(message.event);
         elements["agent-heading"].textContent = "Agent is working";
         elements["agent-event"].textContent = detail;
-        liveEvents.push({
-          at: message.at,
-          kind: humanize(message.event.type),
-          detail,
-        });
-        liveEvents = liveEvents.slice(-50);
-        renderEvents(currentRecord);
       }
     };
 

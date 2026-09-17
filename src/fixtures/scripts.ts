@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { OpenSessionOptions } from "../agent/runner.js";
 import { StubScript } from "../agent/stub-runner.js";
 
@@ -24,14 +26,17 @@ const seasonScripts: StubScript[] = [
     mode: "plan",
     callTools: [
       { name: "recent_commits", args: { count: 15 } },
-      { name: "read_file", args: { path: "src/regulations/season.ts" } },
+      {
+        name: "read_file",
+        args: { path: "src/recommendations/service.ts" },
+      },
     ],
     result: {
       text: json({
         rootCause:
           "The season-end boundary excludes the final valid day.",
         offendingCommit: "5fe267c",
-        suspectFiles: ["src/regulations/season.ts"],
+        suspectFiles: ["src/recommendations/service.ts"],
         proposedFix: "Make the season-end boundary inclusive.",
       }),
     },
@@ -39,12 +44,13 @@ const seasonScripts: StubScript[] = [
   {
     match: "durable fix",
     mode: "agent",
+    execute: applySeasonFixtureFix,
     result: {
       text: json({
         status: "fixed",
         testPath: "test/incident-season.test.ts",
         summary:
-          "Added a reproduction test and made the season-end boundary inclusive.",
+          "Added a focused reproduction test and made the season-end boundary inclusive.",
       }),
     },
   },
@@ -137,4 +143,57 @@ export function incidentScripts(options: OpenSessionOptions): StubScript[] {
   if (label.includes("pool")) return poolScripts;
   if (label.includes("sast") || label.includes("risky")) return riskyScripts;
   return seasonScripts;
+}
+
+async function applySeasonFixtureFix(
+  options: OpenSessionOptions,
+): Promise<void> {
+  const path = resolve(options.cwd, "src/recommendations/service.ts");
+  const source = await readFile(path, "utf8");
+  const before = "return date >= start && date < end;";
+  const after = "return date >= start && date <= end;";
+  if (source.includes(after)) return;
+  if (!source.includes(before)) {
+    throw new Error(
+      "Season fixture could not find the exclusive end-date boundary",
+    );
+  }
+  await writeFile(path, source.replace(before, after), "utf8");
+  await writeFile(
+    resolve(options.cwd, "test/incident-season.test.ts"),
+    `import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import request from "supertest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createApp } from "../src/app.js";
+import { DatabasePool } from "../src/db/pool.js";
+
+describe("season incident reproduction", () => {
+  let directory: string;
+  let pool: DatabasePool;
+
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), "emerald-season-"));
+    pool = new DatabasePool(join(directory, "test.db"), 5, 250);
+    pool.initialize();
+  });
+
+  afterEach(() => {
+    pool.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("keeps the listed season end date open", async () => {
+    const response = await request(createApp(pool))
+      .get("/recommendations")
+      .query({ species: "Coho", area: "Skykomish", date: "2026-09-30" })
+      .expect(200);
+
+    expect(response.body.open).toBe(true);
+  });
+});
+`,
+    "utf8",
+  );
 }

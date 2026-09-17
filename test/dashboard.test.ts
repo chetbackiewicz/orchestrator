@@ -36,7 +36,16 @@ describe("TriageDashboardServer", () => {
     ]);
 
     expect(page).toContain("<title>Incident triage</title>");
+    expect(page).toContain("<h1>Incident Triage</h1>");
+    expect(page).toContain(
+      '"Incident " + record.input.id',
+    );
+    expect(page).toContain("Resume polling");
     expect(page).toContain("color-scheme: dark");
+    expect(page).toContain('id="agent-event"');
+    expect(page).not.toContain('id="events"');
+    expect(page).not.toContain("renderEvents");
+    expect(page).not.toContain("record?.events");
     expect(state.record).toMatchObject({
       state: "investigating",
       input: { id: "incident-demo" },
@@ -65,5 +74,20 @@ describe("TriageDashboardServer", () => {
     } finally {
       await reader!.cancel();
     }
+  });
+
+  it("clears a terminal incident without stopping polling", async () => {
+    const server = new TriageDashboardServer({ port: 0 });
+    servers.push(server);
+    const url = await server.start();
+    server.publishState(record("verified_fixed"));
+
+    await fetch(`${url}/api/reset`, { method: "POST" }).then((response) => {
+      expect(response.status).toBe(204);
+    });
+
+    await expect(
+      fetch(`${url}/api/state`).then((response) => response.json()),
+    ).resolves.toEqual({ record: null });
   });
 });

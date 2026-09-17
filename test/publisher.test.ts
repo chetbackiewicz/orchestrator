@@ -126,7 +126,8 @@ describe("GitHubIncidentPublisher", () => {
         expect(body).toContain("**Pre-fix reproduction failed:** true");
         expect(body).toContain("**Commit:** abc123");
         expect(body).toContain("**Request IDs:** assess, investigate, act");
-        expect(body).toContain("## State transition history");
+        expect(body).not.toContain("## State transition history");
+        expect(body).not.toContain("terminal");
         return ok("https://github.com/octo/service/issues/23\n");
       }
       throw new Error(`Unexpected command: ${joined}`);

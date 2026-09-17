@@ -552,11 +552,6 @@ function issueBody(
     "## Correlation",
     `- **Total tokens:** ${record.totalTokens}`,
     `- **Request IDs:** ${record.requestIds.join(", ") || "None"}`,
-    "",
-    "## State transition history",
-    ...record.events.map(
-      (event) => `- ${event.at} - \`${event.kind}\`: ${event.detail || "N/A"}`,
-    ),
   ].join("\n");
 }
 

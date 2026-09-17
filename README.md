@@ -126,7 +126,7 @@ Queue settings can be supplied by flags or environment:
 | `--lease-seconds` | `INCIDENT_LEASE_SECONDS` | `120` |
 | `--heartbeat-interval-ms` | `INCIDENT_HEARTBEAT_INTERVAL_MS` | `30000` |
 | `--worker-id` | `INCIDENT_WORKER_ID` | Host/PID/random identifier |
-| `--max-tokens` | — | `1000000` |
+| `--max-tokens` | — | `2000000` |
 | `--repo-root` | `INCIDENT_REPO_ROOT` | Required unless `--cwd` is used |
 | `--workspace-root` | `INCIDENT_WORKSPACE_ROOT` | `.incident-orchestrator/worktrees` under the launch directory |
 | `--target-ref` | `INCIDENT_TARGET_REF` | Publication remote/base, normally `origin/main` |

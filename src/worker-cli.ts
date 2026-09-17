@@ -77,7 +77,7 @@ async function main(): Promise<void> {
       store: defaultStore(process.cwd()),
       orchestratorConfig: {
         maxTokensPerIncident:
-          optionalNumber(args, "max-tokens") ?? 1_000_000,
+          optionalNumber(args, "max-tokens") ?? 2_000_000,
         ...(publication.enabled
           ? {
               publisher: new GitHubIncidentPublisher({

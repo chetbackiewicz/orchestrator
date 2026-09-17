@@ -8,5 +8,7 @@ export * from "./pipeline/states.js";
 export * from "./pipeline/types.js";
 export * from "./pipeline/verify.js";
 export * from "./publisher/incident-publisher.js";
+export * from "./queue/client.js";
+export * from "./queue/worker.js";
 export * from "./store/json-store.js";
 export * from "./tools/incident-tools.js";

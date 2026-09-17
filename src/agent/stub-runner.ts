@@ -18,6 +18,7 @@ export interface StubScript {
   match: string | RegExp;
   mode?: RunRequest["mode"];
   callTools?: StubToolCall[];
+  execute?: (options: OpenSessionOptions) => Promise<void> | void;
   result: Omit<RunResult, "status"> & { status?: RunResult["status"] };
 }
 
@@ -67,6 +68,7 @@ class StubSession implements AgentSession {
       await tool.execute(call.args ?? {});
       onEvent?.({ type: "tool_call", name: call.name, status: "completed" });
     }
+    await script.execute?.(this.options);
     if (script.result.text) {
       onEvent?.({ type: "assistant", text: script.result.text });
     }

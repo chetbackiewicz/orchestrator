@@ -71,10 +71,11 @@ npm run triage -- \
 ```
 
 Add `--dashboard` to expose a live, dark-themed browser dashboard at
-`http://127.0.0.1:4317`. It displays the current triage stage, streaming agent
-activity, severity, autonomy decision, token usage, findings, and terminal
-outcome. The dashboard remains available after triage completes until the
-process is stopped:
+`http://127.0.0.1:4317`. It displays the current triage stage, the active
+streamed agent operation, severity, autonomy decision, token usage, findings,
+and terminal outcome. Tool activity is ephemeral and is not replayed as a
+historical list. The dashboard remains available after triage completes until
+the process is stopped:
 
 ```bash
 npm run triage -- \
@@ -89,6 +90,94 @@ npm run triage -- \
 Use `--dashboard-port 4400`, `INCIDENT_DASHBOARD=true`, or
 `INCIDENT_DASHBOARD_PORT=4400` to change how it is enabled. The server binds to
 localhost only.
+
+## Emerald Osprey queue worker
+
+Run the dedicated worker to poll Emerald Osprey's durable SQLite-backed HTTP
+queue and process one incident at a time:
+
+```bash
+npm run worker -- \
+  --queue-url http://127.0.0.1:3000 \
+  --cwd ../emerald-osprey \
+  --pre-fix-ref main \
+  --dashboard
+```
+
+The one-shot `triage` command is unchanged. The worker reuses its runner, token
+budget, verification, optional GitHub publication, JSON incident store, and
+dashboard behavior. Serial processing protects the shared target checkout,
+agent edits, verification worktrees, branches, and publication flow.
+
+Queue settings can be supplied by flags or environment:
+
+| Flag | Environment | Default |
+| --- | --- | --- |
+| `--queue-url` | `INCIDENT_QUEUE_URL` | Required |
+| `--poll-interval-ms` | `INCIDENT_POLL_INTERVAL_MS` | `5000` |
+| `--lease-seconds` | `INCIDENT_LEASE_SECONDS` | `120` |
+| `--heartbeat-interval-ms` | `INCIDENT_HEARTBEAT_INTERVAL_MS` | `30000` |
+| `--worker-id` | `INCIDENT_WORKER_ID` | Host/PID/random identifier |
+| `--max-tokens` | — | `1000000` |
+
+The heartbeat interval must be shorter than the lease. Queue transport and 5xx
+failures use bounded exponential backoff; invalid contracts and permanent 4xx
+errors stop the worker explicitly. `SIGINT` and `SIGTERM` stop new claims,
+allow active triage to return, close the dashboard, and then exit.
+
+### Queue contract
+
+Emerald submits a durable incident with a client idempotency key:
+
+```json
+{
+  "idempotencyKey": "ui:season:01J...",
+  "summary": "Incorrect season recommendation",
+  "payload": {
+    "trigger": "manual",
+    "report": "Users receive an incorrect season-open recommendation near the boundary."
+  }
+}
+```
+
+The orchestrator requires the server-assigned incident `id`,
+`payload.trigger` (`manual` or `automated`), and a non-empty
+`payload.report`. It supplies `cwd` from trusted local configuration and never
+accepts a filesystem path from the queue.
+
+The worker uses:
+
+- `POST /api/incidents/claim` with `{ workerId, leaseSeconds }`. Emerald returns
+  `204` when empty, or an atomic claim containing the incident,
+  `attemptCount`, and `{ token, expiresAt }`.
+- `POST /api/incidents/:id/lease` with the worker ID, claim token, lease
+  duration, and latest triage state. State is one of `received`, `assessing`,
+  `investigating`, `acting`, `awaiting_verification`, `verified_fixed`,
+  `escalated`, `needs_human`, `failed`, or `budget_exceeded`.
+- `POST /api/incidents/:id/complete` with an attempt-scoped `callbackId`,
+  `outcome: "resolved"`, and the terminal incident result. Terminal result
+  states are `verified_fixed`, `escalated`, `needs_human`, `failed`, and
+  `budget_exceeded`. The callback excludes the local absolute `cwd`, raw
+  token-by-token stream events, and oversized diagnostic text. The full record
+  remains in the local JSON incident store.
+- `POST /api/incidents/:id/fail` only when no terminal incident record can be
+  produced, with the same attempt-scoped idempotency behavior plus
+  `retryable`, optional `retryAfterSeconds`, and `error`.
+
+Emerald owns queue status, atomic claim transactions, lease expiry, retry
+delays, and the server-wide maximum attempt count. The recommended maximum is
+three claims per incident. Callback retries reuse
+`<incident-id>:<attempt-count>:complete|fail`; identical retries must return
+success, while changed payloads and stale claim tokens return `409`.
+
+The worker writes the detailed terminal record to
+`.incident-orchestrator/incidents.json` under the directory where the worker
+was launched before acknowledging completion. Keeping worker state outside the
+target checkout prevents orchestrator bookkeeping from being mistaken for an
+agent-authored source change during verification. All terminal triage states,
+including a pipeline-recorded `failed` state, are completed processing results.
+The failure endpoint is reserved for worker infrastructure, invalid ticket, or
+persistence failures.
 
 The publisher derives `owner/repository` from the target repository's `origin`
 remote. Use `--github-repo owner/repository` or `--github-remote upstream` when
@@ -149,7 +238,9 @@ src/
   config/      CLI and publication configuration parsing
   pipeline/    state machine, prompts, schemas, verification, orchestration
   publisher/   injectable host-side GitHub outcome publication
+  queue/       typed Emerald HTTP client and serial lease-aware worker
   store/       atomic JSON incident persistence
   tools/       in-process investigation tools
   cli.ts       command-line entry point
+  worker-cli.ts long-running Emerald incident queue entry point
 ```

@@ -176,7 +176,9 @@ export async function triageIncident(
       parseFixClaim,
     );
     record.claim = claim.value;
-    if (!record.claim.branch && claim.result.branch) {
+    if (input.workspaceBranch) {
+      record.claim.branch = input.workspaceBranch;
+    } else if (!record.claim.branch && claim.result.branch) {
       record.claim.branch = claim.result.branch;
     }
     if (stopForBudget()) return finish();

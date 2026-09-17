@@ -150,6 +150,103 @@ describe("GitHubIncidentPublisher", () => {
     );
   });
 
+  it("publishes from the pre-created managed branch without switching branches", async () => {
+    const managed = record();
+    managed.input.workspaceBranch =
+      "incident-fix/incident-season-managed-attempt-2";
+    let branchDiffCalls = 0;
+    const commands = new FakeCommands((command, args) => {
+      const joined = `${command} ${args.join(" ")}`;
+      if (joined.startsWith("gh issue list")) return ok("[]");
+      if (joined.startsWith("gh pr list")) return ok("[]");
+      if (joined === "git status --porcelain=v1 -z --untracked-files=all") {
+        return ok(" M src/season.ts\0?? test/season.test.ts\0");
+      }
+      if (joined === "git fetch --no-tags origin main") return ok();
+      if (joined === "git rev-parse --verify --quiet origin/main") return ok();
+      if (joined === "git diff --name-only origin/main...HEAD --") {
+        branchDiffCalls += 1;
+        return branchDiffCalls === 1
+          ? ok()
+          : ok("src/season.ts\ntest/season.test.ts\n");
+      }
+      if (joined === "git branch --show-current") {
+        return ok(`${managed.input.workspaceBranch}\n`);
+      }
+      if (joined.startsWith("git add -- ")) return ok();
+      if (joined === "git diff --cached --name-only --") {
+        return ok("src/season.ts\ntest/season.test.ts\n");
+      }
+      if (joined.startsWith("git commit ")) return ok();
+      if (joined === "git rev-parse HEAD") return ok("def456\n");
+      if (
+        joined ===
+        `git push --set-upstream origin ${managed.input.workspaceBranch}`
+      ) {
+        return ok();
+      }
+      if (joined.startsWith("gh pr create")) {
+        return ok("https://github.com/octo/service/pull/18\n");
+      }
+      if (joined.startsWith("gh issue create")) {
+        return ok("https://github.com/octo/service/issues/24\n");
+      }
+      throw new Error(`Unexpected command: ${joined}`);
+    });
+    const publisher = new GitHubIncidentPublisher({
+      repository: "octo/service",
+      commandRunner: commands,
+    });
+
+    const result = await publisher.publish(managed);
+
+    expect(result).toMatchObject({
+      status: "published",
+      branch: managed.input.workspaceBranch,
+      commitSha: "def456",
+    });
+    expect(
+      commands.calls.some((call) => call.startsWith("git switch")),
+    ).toBe(false);
+  });
+
+  it("refuses publication when a managed workspace is on another branch", async () => {
+    const managed = record();
+    managed.input.workspaceBranch =
+      "incident-fix/incident-season-managed-attempt-2";
+    const commands = new FakeCommands((command, args) => {
+      const joined = `${command} ${args.join(" ")}`;
+      if (joined.startsWith("gh issue list")) return ok("[]");
+      if (joined.startsWith("gh pr list")) return ok("[]");
+      if (joined === "git status --porcelain=v1 -z --untracked-files=all") {
+        return ok(" M src/season.ts\0?? test/season.test.ts\0");
+      }
+      if (joined === "git fetch --no-tags origin main") return ok();
+      if (joined === "git rev-parse --verify --quiet origin/main") return ok();
+      if (joined === "git diff --name-only origin/main...HEAD --") return ok();
+      if (joined === "git branch --show-current") return ok("main\n");
+      if (joined.startsWith("gh issue create")) {
+        expect(args.join(" ")).toContain(
+          "Managed workspace is on branch main",
+        );
+        return ok("https://github.com/octo/service/issues/25\n");
+      }
+      throw new Error(`Unexpected command: ${joined}`);
+    });
+    const publisher = new GitHubIncidentPublisher({
+      repository: "octo/service",
+      commandRunner: commands,
+    });
+
+    const result = await publisher.publish(managed);
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("expected incident-fix/");
+    expect(
+      commands.calls.some((call) => call.startsWith("git switch")),
+    ).toBe(false);
+  });
+
   it.each(["escalated", "needs_human", "failed", "budget_exceeded"] as const)(
     "creates only an evidence issue for %s outcomes",
     async (state) => {

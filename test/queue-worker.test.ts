@@ -16,6 +16,13 @@ import {
   completionResult,
   IncidentQueueWorker,
 } from "../src/queue/worker.js";
+import {
+  FixedIncidentWorkspaceManager,
+  IncidentWorkspace,
+  IncidentWorkspaceManager,
+  WorkspaceDisposition,
+  WorkspaceReleaseResult,
+} from "../src/workspace/manager.js";
 
 const runner: AgentRunner = {
   kind: "stub",
@@ -127,6 +134,45 @@ class FakeQueueClient implements IncidentQueueClient {
   }
 }
 
+class FakeWorkspaceManager implements IncidentWorkspaceManager {
+  readonly acquisitions: Array<{
+    incidentId: string;
+    attemptCount: number;
+  }> = [];
+  readonly releases: Array<{
+    workspace: IncidentWorkspace;
+    disposition: WorkspaceDisposition;
+  }> = [];
+  acquireError: Error | undefined;
+  onRelease: (() => void) | undefined;
+
+  constructor(
+    readonly workspace: IncidentWorkspace = {
+      cwd: "/managed/incident-season",
+      preFixRef: "abc123",
+      branch: "incident-fix/incident-season-attempt-2",
+    },
+  ) {}
+
+  async acquire(
+    incidentId: string,
+    attemptCount: number,
+  ): Promise<IncidentWorkspace> {
+    this.acquisitions.push({ incidentId, attemptCount });
+    if (this.acquireError) throw this.acquireError;
+    return this.workspace;
+  }
+
+  async release(
+    workspace: IncidentWorkspace,
+    disposition: WorkspaceDisposition,
+  ): Promise<WorkspaceReleaseResult> {
+    this.releases.push({ workspace, disposition });
+    this.onRelease?.();
+    return { removed: disposition === "published" };
+  }
+}
+
 function makeWorker(
   client: FakeQueueClient,
   overrides: Partial<
@@ -136,7 +182,10 @@ function makeWorker(
   return new IncidentQueueWorker({
     client,
     workerId: "worker-1",
-    cwd: "/trusted/emerald-osprey",
+    workspaceManager: new FixedIncidentWorkspaceManager(
+      "/trusted/emerald-osprey",
+      "main",
+    ),
     pollIntervalMs: 5_000,
     leaseSeconds: 120,
     heartbeatIntervalMs: 30_000,
@@ -144,7 +193,6 @@ function makeWorker(
     store: { async put() {} },
     orchestratorConfig: {
       maxTokensPerIncident: 100,
-      preFixRef: "main",
     },
     sleep: async () => {},
     random: () => 0,
@@ -170,6 +218,7 @@ describe("IncidentQueueWorker", () => {
         return record(input.id);
       },
     });
+
     client.onComplete = () => order.push("complete");
 
     await expect(
@@ -194,6 +243,113 @@ describe("IncidentQueueWorker", () => {
       result: { state: "verified_fixed" },
     });
     expect(client.completions[0]?.result).not.toHaveProperty("input");
+  });
+
+  it("uses an acquired managed workspace and its immutable pre-fix ref", async () => {
+    const client = new FakeQueueClient(claimed());
+    const workspaceManager = new FakeWorkspaceManager();
+    let seenInput: IncidentRecord["input"] | undefined;
+    let seenPreFixRef: string | undefined;
+    const worker = makeWorker(client, {
+      workspaceManager,
+      triage: async (input, _runner, config) => {
+        seenInput = input;
+        seenPreFixRef = config.preFixRef;
+        return record(input.id);
+      },
+    });
+
+    await worker.processNext(new AbortController().signal);
+
+    expect(workspaceManager.acquisitions).toEqual([
+      { incidentId: "incident-season", attemptCount: 2 },
+    ]);
+    expect(seenInput).toEqual({
+      id: "incident-season",
+      trigger: "manual",
+      report: "season boundary is wrong",
+      cwd: "/managed/incident-season",
+      workspaceBranch: "incident-fix/incident-season-attempt-2",
+    });
+    expect(seenPreFixRef).toBe("abc123");
+    expect(workspaceManager.releases).toEqual([
+      {
+        workspace: workspaceManager.workspace,
+        disposition: "completed",
+      },
+    ]);
+  });
+
+  it("reports workspace acquisition failures without starting triage", async () => {
+    const client = new FakeQueueClient(claimed());
+    const workspaceManager = new FakeWorkspaceManager();
+    workspaceManager.acquireError = new Error("git worktree failed");
+    const triage = vi.fn();
+    const worker = makeWorker(client, { workspaceManager, triage });
+
+    await worker.processNext(new AbortController().signal);
+
+    expect(triage).not.toHaveBeenCalled();
+    expect(client.failures).toEqual([
+      expect.objectContaining({
+        retryable: true,
+        error:
+          "Unable to prepare incident workspace: git worktree failed",
+      }),
+    ]);
+    expect(workspaceManager.releases).toHaveLength(0);
+  });
+
+  it("acknowledges completion before releasing a managed workspace", async () => {
+    const client = new FakeQueueClient(claimed());
+    const workspaceManager = new FakeWorkspaceManager();
+    const order: string[] = [];
+    client.onComplete = () => order.push("complete");
+    workspaceManager.onRelease = () => order.push("release");
+    const worker = makeWorker(client, {
+      workspaceManager,
+      triage: async (input) => record(input.id),
+    });
+
+    await worker.processNext(new AbortController().signal);
+
+    expect(order).toEqual(["complete", "release"]);
+  });
+
+  it("preserves managed workspaces when triage infrastructure fails", async () => {
+    const client = new FakeQueueClient(claimed());
+    const workspaceManager = new FakeWorkspaceManager();
+    const worker = makeWorker(client, {
+      workspaceManager,
+      triage: async () => {
+        throw new Error("agent unavailable");
+      },
+    });
+
+    await worker.processNext(new AbortController().signal);
+
+    expect(client.failures).toHaveLength(1);
+    expect(workspaceManager.releases[0]?.disposition).toBe("failed");
+  });
+
+  it("marks published workspaces safe for cleanup", async () => {
+    const client = new FakeQueueClient(claimed());
+    const workspaceManager = new FakeWorkspaceManager();
+    const worker = makeWorker(client, {
+      workspaceManager,
+      triage: async (input) => ({
+        ...record(input.id),
+        publication: {
+          status: "published",
+          baseBranch: "main",
+          branch: workspaceManager.workspace.branch!,
+        },
+      }),
+    });
+
+    await worker.processNext(new AbortController().signal);
+
+    expect(workspaceManager.releases[0]?.disposition).toBe("published");
   });
 
   it("rejects invalid ticket payloads without starting triage", async () => {

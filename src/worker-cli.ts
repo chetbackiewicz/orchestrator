@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
 import { makeAgentRunner } from "./agent/index.js";
 import {
   dashboardConfig,
@@ -7,7 +6,7 @@ import {
   parseArgs,
   publishingConfig,
   queueWorkerConfig,
-  required,
+  workspaceConfig,
 } from "./config/cli-config.js";
 import { TriageDashboardServer } from "./dashboard/server.js";
 import { incidentScripts } from "./fixtures/scripts.js";
@@ -15,13 +14,34 @@ import { HttpIncidentQueueClient } from "./queue/client.js";
 import { IncidentQueueWorker } from "./queue/worker.js";
 import { GitHubIncidentPublisher } from "./publisher/incident-publisher.js";
 import { defaultStore } from "./store/json-store.js";
+import {
+  FixedIncidentWorkspaceManager,
+  GitIncidentWorkspaceManager,
+} from "./workspace/manager.js";
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const runner = makeAgentRunner({ stubScripts: incidentScripts });
-  const cwd = resolve(required(args, "cwd"));
   const queueOptions = queueWorkerConfig(args, process.env);
   const publication = publishingConfig(args, process.env);
+  const workspaceOptions = workspaceConfig(
+    args,
+    process.env,
+    process.cwd(),
+    `${publication.remote}/${publication.baseBranch}`,
+  );
+  const workspaceManager =
+    workspaceOptions.mode === "fixed"
+      ? new FixedIncidentWorkspaceManager(
+          workspaceOptions.cwd,
+          workspaceOptions.preFixRef,
+        )
+      : new GitIncidentWorkspaceManager({
+          repoRoot: workspaceOptions.repoRoot,
+          workspaceRoot: workspaceOptions.workspaceRoot,
+          targetRef: workspaceOptions.targetRef,
+          remote: publication.remote,
+        });
   const dashboardOptions = dashboardConfig(args, process.env);
   const dashboard = dashboardOptions.enabled
     ? new TriageDashboardServer({ port: dashboardOptions.port })
@@ -49,7 +69,7 @@ async function main(): Promise<void> {
         baseUrl: queueOptions.baseUrl,
       }),
       workerId: queueOptions.workerId,
-      cwd,
+      workspaceManager,
       pollIntervalMs: queueOptions.pollIntervalMs,
       leaseSeconds: queueOptions.leaseSeconds,
       heartbeatIntervalMs: queueOptions.heartbeatIntervalMs,
@@ -58,7 +78,6 @@ async function main(): Promise<void> {
       orchestratorConfig: {
         maxTokensPerIncident:
           optionalNumber(args, "max-tokens") ?? 1_000_000,
-        preFixRef: required(args, "pre-fix-ref"),
         ...(publication.enabled
           ? {
               publisher: new GitHubIncidentPublisher({
@@ -86,6 +105,13 @@ async function main(): Promise<void> {
       },
       onError: (error) => {
         process.stderr.write(`Incident queue error: ${error.message}\n`);
+      },
+      onWorkspaceRelease: (workspace, result) => {
+        process.stderr.write(
+          result.removed
+            ? `Removed incident workspace ${workspace.cwd}.\n`
+            : `${result.reason ?? `Preserved incident workspace ${workspace.cwd}.`}\n`,
+        );
       },
     });
 
